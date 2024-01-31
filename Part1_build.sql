@@ -13,6 +13,8 @@ GO
 
 SELECT TOP 100 * FROM patient
 
+SELECT COUNT(DISTINCT p.registration_guid) , COUNT(1)
+FROM patient p
 
 ---------------------------------------------------------------------------------------------------
 --	NULL CHECKS
@@ -86,4 +88,15 @@ GROUP BY	postcode,
 ORDER BY	volume DESC
 
 
+SELECT		TOP 1000 SUBSTRING(postcode,1,(CHARINDEX(' ',postcode,1))), 
+			gender,
+			COUNT(1) Volume
+FROM		patient
+--WHERE		date_of_death is NULL
+GROUP BY	SUBSTRING(postcode,1,(CHARINDEX(' ',postcode,1))),
+			gender
+ORDER BY	volume DESC
 
+
+SELECT COUNT(DISTINCT p.registration_guid) , COUNT(1)
+FROM patient p
