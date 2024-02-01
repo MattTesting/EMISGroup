@@ -18,7 +18,7 @@ GO
 ---------------------------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------------------------
 --	Patients by postcode - data validated in Part1 SQL. 
---	Maximum number of patients in scope is 1996
+--	1996 records in scope
 
 IF OBJECT_ID (N'tempdb..#PatientList',N'U') IS NOT NULL
 			DROP TABLE #PatientList
@@ -38,6 +38,7 @@ CREATE INDEX IX_registration_guid ON #PatientList (registration_guid)
 ---------------------------------------------------------------------------------------------------
 --	INCLUSIONS
 
+---------------------------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------------------------
 --	Asthma
 --	Current diagnosis of asthma, i.e. have current observation in their medical record with relevant clinical 
@@ -97,7 +98,7 @@ IF OBJECT_ID (N'tempdb..#Asthma',N'U') IS NOT NULL
 --	Olodaterol (codeid 1223821000033118, SNOMED concept id 704459002)
 
 
---	Sanity check - do the medication records map to the clinical codes?  
+--	Sanity check - Couldnt find any matches for the drug codes so did a quick count of what does match
 /*
 SELECT		COUNT(1)
 FROM		medication m INNER JOIN clinical_codes cc ON m.emis_code_id = cc.code_id
@@ -120,24 +121,26 @@ SELECT		p.patient_id,
 INTO		#Medication
 FROM		medication m INNER JOIN clinical_codes cc on m.emis_code_id = cc.code_id
 			INNER JOIN patient p on m.registration_guid = p.registration_guid
---WHERE		cc.code_Id IN (591221000033116,717321000033118,1215621000033114,972021000033115,1223821000033118)			--************************ REMOVE THESE COMMENTS ************************
+--			Below codes defined in spec
+--WHERE		cc.code_Id IN (591221000033116,717321000033118,1215621000033114,972021000033115,1223821000033118)			--************************ REMOVE THESE COMMENTS FOR TEST ************************
 
 
 IF OBJECT_ID (N'tempdb..#MedicationShortList',N'U') IS NOT NULL
 			DROP TABLE #MedicationShortList
 
+--	zero records in scope as source temp table returns zero
 SELECT		patient_id,
+			registration_guid,
 			recorded_date, 
 			emis_mostrecent_issue_date,		-- date of the prescription
 			exa_mostrecent_issue_date,
 			DerivedPrescriptionDate,
-			registration_guid,
 			fhir_medication_status,
 			regular_and_current_active_flag,
 			NewestSortOrder
 INTO		#MedicationShortList
 FROM		#Medication
-WHERE		DerivedPrescriptionDate >= DATEADD("DAY",-(30*365),GETDATE())		--	
+WHERE		DerivedPrescriptionDate >= DATEADD("DAY",-(30*365),GETDATE())		--	last 30 years
 
 CREATE INDEX IX_registration_guid ON #MedicationShortList (registration_guid)
 
@@ -147,16 +150,166 @@ IF OBJECT_ID (N'tempdb..#Medication',N'U') IS NOT NULL
 
 --	SELECT TOP 100 * FROM #MedicationShortList
 
----------------------------------------------------------------------------------------------------
---	
-
 
 ---------------------------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------------------------
+--	Exclusions
+
+---------------------------------------------------------------------------------------------------
+---------------------------------------------------------------------------------------------------
+--	Smoker
+--	AND should be excluded if:
+--		Currently a smoker i.e.  have current observation with relevant clinical codes from smoker 
+--		refset (refsetid 999004211000230104)
+
+--	Again looking at the most recent record to allow for someone that has quit smoking.
+--	1926 patients in scope
+
+IF OBJECT_ID (N'tempdb..#Smoker',N'U') IS NOT NULL
+			DROP TABLE #Smoker
+
+SELECT		p.patient_id,
+			o.registration_guid, 
+			o.recorded_date,
+			o.regular_and_current_active_flag,
+			ROW_NUMBER() OVER (PARTITION BY p.patient_id ORDER BY o.recorded_date DESC) as NewestSortOrder
+INTO		#Smoker
+FROM		observation o 
+			INNER JOIN clinical_codes cc ON o.emis_code_id = cc.Code_id
+			INNER JOIN patient p on o.registration_guid = p.registration_guid
+WHERE		observation_type = 'Observation'
+AND			cc.refset_simple_id IN (999004211000230104)		--	Smoker
 
 
+--	registration_guid is going to the most referenced column so I've added an index on it.	
+CREATE INDEX IX_registration_guid ON #Smoker (registration_guid)
+
+
+--	Filter the most recent record and check current status
+--	805 unique registration_guids where most recent record is active/current
+IF OBJECT_ID (N'tempdb..#SmokerShortList',N'U') IS NOT NULL
+			DROP TABLE #SmokerShortList
+
+SELECT		patient_id,
+			registration_guid,
+			recorded_date,
+			regular_and_current_active_flag,
+			NewestSortOrder
+INTO		#SmokerShortList
+FROM		#Smoker
+WHERE		NewestSortOrder = 1
+AND			regular_and_current_active_flag = 'true'
+
+CREATE INDEX IX_registration_guid ON #SmokerShortlist (registration_guid)
+
+--	Housekeeping
+IF OBJECT_ID (N'tempdb..#Smoker',N'U') IS NOT NULL
+			DROP TABLE #Smoker
 
 
 
 ---------------------------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------------------------
+--	COPD
+--	Current diagnosis of COPD, i.e. have current observation in their medical record with relevant clinical 
+--	codes from COPD refset (refsetid 999011571000230107), and not resolved
+
+--	Pull all COPD records recardless of currently active status.  I want to use the most recent 
+--	record to check its active.  Less of an issue for asthma but curable conditions may need the logic.
+--	290 patients in scope
+
+IF OBJECT_ID (N'tempdb..#COPD',N'U') IS NOT NULL
+			DROP TABLE #COPD
+
+SELECT		p.patient_id,
+			o.registration_guid, 
+			o.recorded_date,
+			o.regular_and_current_active_flag,
+			ROW_NUMBER() OVER (PARTITION BY p.patient_id ORDER BY o.recorded_date DESC) as NewestSortOrder
+INTO		#COPD
+FROM		observation o 
+			INNER JOIN clinical_codes cc ON o.emis_code_id = cc.Code_id
+			INNER JOIN patient p on o.registration_guid = p.registration_guid
+WHERE		observation_type = 'Observation'
+AND			cc.refset_simple_id IN (999011571000230107)		--	COPD
+
+
+--	registration_guid is going to the most referenced column so I've added an index on it.	
+CREATE INDEX IX_registration_guid ON #COPD (registration_guid)
+
+
+--	Filter the most recent record and check current status
+--	59 unique registration_guids where most recent record is active/current
+IF OBJECT_ID (N'tempdb..#COPDShortList',N'U') IS NOT NULL
+			DROP TABLE #COPDShortList
+
+SELECT		registration_guid,
+			recorded_date,
+			regular_and_current_active_flag,
+			NewestSortOrder
+INTO		#COPDShortList
+FROM		#COPD
+WHERE		NewestSortOrder = 1
+AND			regular_and_current_active_flag = 'true'
+
+CREATE INDEX IX_registration_guid ON #COPDShortlist (registration_guid)
+
+--	Housekeeping
+IF OBJECT_ID (N'tempdb..#COPD',N'U') IS NOT NULL
+			DROP TABLE #COPD
+
+---------------------------------------------------------------------------------------------------
+---------------------------------------------------------------------------------------------------
+--	Weight
+--	Currently weight less than 40kg (SNOMED concept id 27113001)
+
+
+--	2976 records
+IF OBJECT_ID(N'tempdb..#Weight') IS NOT NULL DROP TABLE #Weight
+GO
+
+SELECT		o.observation_type,
+			o.emis_original_term,
+			o.numericvalue,
+			o.uom,		--	This is populated for all rows as kg
+			o.emis_code_id,
+			o.recorded_date,
+			p.patient_id,
+			o.Registration_guid,
+			ROW_NUMBER() OVER (PARTITION BY p.patient_id ORDER BY o.recorded_date DESC) as NewestSortOrder
+INTO		#Weight
+FROM		observation o INNER JOIN patient p ON o.registration_guid = p.registration_guid
+WHERE		snomed_concept_id = 27113001
+
+--	Filter the most recent record and check current status
+--	163 records
+IF OBJECT_ID (N'tempdb..#WeightShortList',N'U') IS NOT NULL
+			DROP TABLE #WeightShortList
+
+SELECT		patient_id,
+			registration_guid,
+			numericvalue
+INTO		#WeightShortList
+FROM		#Weight
+WHERE		NewestSortOrder = 1
+AND			numericvalue < 40	--	weight less than 40kg
+
+
+
+--	Housekeeping
+IF OBJECT_ID (N'tempdb..#Weight',N'U') IS NOT NULL
+			DROP TABLE #Weight
+
+---------------------------------------------------------------------------------------------------
+---------------------------------------------------------------------------------------------------
+/*
+Current have inclusion datasets for:
+	Patient		-1996 rows
+	Asthma		-404 rows
+	Medication	-0 rows (tested without this criteria created 2994 rows)
+
+Currently have exclusion datasets for:
+	Smoker		-805 rows
+	COPD		-59 rows
+	Weight		-163 rows
+/*
