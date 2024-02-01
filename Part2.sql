@@ -366,9 +366,14 @@ Currently have exclusion datasets for:
 	Weight		-163 rows
 	Optout		-658 - 9 unique patients
 */
+
+
+
+/* Correction needed - Inclusions need to be BOTH, not either  */
+
+
 IF OBJECT_ID (N'tempdb..#Inclusions',N'U') IS NOT NULL
 			DROP TABLE #Inclusions
-
 
 --	Blended inclusions
 SELECT		a.Patient_id, 'asthma' AS Source
@@ -415,3 +420,21 @@ FROM		#PatientList p
 			INNER JOIN #Inclusions i ON p.patient_id = i.patient_id		--	reduction to 58 unique clients
 WHERE		p.patient_id NOT IN (
 				SELECT e.patient_id from #Exclusions e )-- Reduction to 36 records
+
+
+
+
+SELECT		DISTINCT
+			p.registration_guid,
+			p.patient_id, 
+			p.FullName, 
+			p.postcode,
+			p.age,
+			p.gender
+FROM		#PatientList p
+			INNER JOIN #AsthmaShortList a ON p.patient_id = a.patient_id		
+			INNER JOIN #MedicationShortList m ON p.Patient_id = m.patient_id
+WHERE		p.patient_id NOT IN (
+				SELECT e.patient_id from #Exclusions e )-- Reduction to 36 records
+
+				SELECT * FROM #MedicationShortList
