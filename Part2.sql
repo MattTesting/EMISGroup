@@ -25,7 +25,13 @@ IF OBJECT_ID (N'tempdb..#PatientList',N'U') IS NOT NULL
 
 SELECT		p.patient_id, 
 			p.registration_guid,
-			SUBSTRING(postcode,1,(CHARINDEX(' ',postcode,1)))  OutboundPostCode
+			SUBSTRING(postcode,1,(CHARINDEX(' ',postcode,1)))  OutboundPostCode,
+			p.postcode,
+			p.patient_givenname,
+			p.patient_surname,
+			p.Patient_givenname + ' ' + p.patient_surname FullName,
+			p.age, --assumes this is calculated each day by source system. 
+			p.gender
 INTO		#PatientList 
 FROM		patient p
 WHERE		p.date_of_death IS NULL
@@ -33,6 +39,8 @@ AND			SUBSTRING(p.postcode,1,(CHARINDEX(' ',p.postcode,1))) IN ('LS99','S72','LS
 
 --	registration_guid is going to the most referenced column so I've added an index on it.	
 CREATE INDEX IX_registration_guid ON #PatientList (registration_guid)
+
+--	SELECT TOP 100 * FROM #PatientList
 	
 ---------------------------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------------------------
@@ -73,7 +81,8 @@ CREATE INDEX IX_registration_guid ON #Asthma (registration_guid)
 IF OBJECT_ID (N'tempdb..#AsthmaShortList',N'U') IS NOT NULL
 			DROP TABLE #AsthmaShortList
 
-SELECT		registration_guid,
+SELECT		patient_id,
+			registration_guid,
 			recorded_date,
 			regular_and_current_active_flag,
 			NewestSortOrder
@@ -87,6 +96,8 @@ CREATE INDEX IX_registration_guid ON #AsthmaShortlist (registration_guid)
 --	Housekeeping
 IF OBJECT_ID (N'tempdb..#Asthma',N'U') IS NOT NULL
 			DROP TABLE #Asthma
+
+--	SELECT COUNT(1) , COUNT(DISTINCT patient_id) FROM #AsthmaShortList
 
 ---------------------------------------------------------------------------------------------------
 --	Prescriptions
@@ -122,7 +133,7 @@ INTO		#Medication
 FROM		medication m INNER JOIN clinical_codes cc on m.emis_code_id = cc.code_id
 			INNER JOIN patient p on m.registration_guid = p.registration_guid
 --			Below codes defined in spec
---WHERE		cc.code_Id IN (591221000033116,717321000033118,1215621000033114,972021000033115,1223821000033118)			--************************ REMOVE THESE COMMENTS FOR TEST ************************
+--WHERE		cc.code_Id IN (591221000033116,717321000033118,1215621000033114,972021000033115,1223821000033118)			--************************ REMOVE THESE COMMENTS FOR LIVE ************************
 
 
 IF OBJECT_ID (N'tempdb..#MedicationShortList',N'U') IS NOT NULL
@@ -148,12 +159,13 @@ CREATE INDEX IX_registration_guid ON #MedicationShortList (registration_guid)
 IF OBJECT_ID (N'tempdb..#Medication',N'U') IS NOT NULL
 			DROP TABLE #Medication
 
---	SELECT TOP 100 * FROM #MedicationShortList
+
+--	SELECT COUNT(1) , COUNT(DISTINCT patient_id) FROM #MedicationShortList
 
 
 ---------------------------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------------------------
---	Exclusions
+--	EXCLUSIONS
 
 ---------------------------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------------------------
@@ -207,6 +219,7 @@ IF OBJECT_ID (N'tempdb..#Smoker',N'U') IS NOT NULL
 			DROP TABLE #Smoker
 
 
+--	SELECT COUNT(1) , COUNT(DISTINCT patient_id) FROM #SmokerShortlist
 
 ---------------------------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------------------------
@@ -243,7 +256,8 @@ CREATE INDEX IX_registration_guid ON #COPD (registration_guid)
 IF OBJECT_ID (N'tempdb..#COPDShortList',N'U') IS NOT NULL
 			DROP TABLE #COPDShortList
 
-SELECT		registration_guid,
+SELECT		patient_id,
+			registration_guid,
 			recorded_date,
 			regular_and_current_active_flag,
 			NewestSortOrder
@@ -258,6 +272,9 @@ CREATE INDEX IX_registration_guid ON #COPDShortlist (registration_guid)
 IF OBJECT_ID (N'tempdb..#COPD',N'U') IS NOT NULL
 			DROP TABLE #COPD
 
+
+--	SELECT COUNT(1) , COUNT(DISTINCT patient_id) FROM #COPDShortlist
+
 ---------------------------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------------------------
 --	Weight
@@ -265,7 +282,8 @@ IF OBJECT_ID (N'tempdb..#COPD',N'U') IS NOT NULL
 
 
 --	2976 records
-IF OBJECT_ID(N'tempdb..#Weight') IS NOT NULL DROP TABLE #Weight
+IF OBJECT_ID(N'tempdb..#Weight') IS NOT NULL 
+			DROP TABLE #Weight
 GO
 
 SELECT		o.observation_type,
@@ -281,6 +299,10 @@ INTO		#Weight
 FROM		observation o INNER JOIN patient p ON o.registration_guid = p.registration_guid
 WHERE		snomed_concept_id = 27113001
 
+--	validate the latest recorded weight is correctly marked as NewestSortOrder = 1
+--	SELECT * FROM #Weight WHERE patient_id = 9599 ORDER BY recorded_date
+
+
 --	Filter the most recent record and check current status
 --	163 records
 IF OBJECT_ID (N'tempdb..#WeightShortList',N'U') IS NOT NULL
@@ -295,10 +317,40 @@ WHERE		NewestSortOrder = 1
 AND			numericvalue < 40	--	weight less than 40kg
 
 
-
 --	Housekeeping
 IF OBJECT_ID (N'tempdb..#Weight',N'U') IS NOT NULL
 			DROP TABLE #Weight
+
+
+--	SELECT COUNT(1) , COUNT(DISTINCT patient_id) FROM #WeightShortList
+--	SELECT * FROM #Weight WHERE patient_id = 9599 ORDER BY recorded_date
+
+---------------------------------------------------------------------------------------------------
+---------------------------------------------------------------------------------------------------
+--	Optouts
+--	Only patients that have not opted out of taking part in research or sharing their medical record 
+--	should be invited to participate (type 1 opt out, connected care opt out)
+
+--	Only opt out fields available are medication and observation.
+--	93c1 identified as type 1 opt out via Google. 
+--	(https://www.mysurgerywebsite.co.uk/website/L81078/files/Gloucester_Road_Medical_Centre_Data_sharing_opt_out_form.pdf)
+--	(https://kintburyandwooltonhillsurgeries.co.uk/wp-content/uploads/2020/05/5.-Patient-Data-Sharing-Opt-Out-KBWH-v20.1.pdf)
+--	93c1 appears to cover type 1 opt out and connected care opt out
+
+--	Date constraint has been dropped from this code as it's not clear if the opt out is persistant or required for every observation.
+
+--	658 rows - 9 unique
+IF OBJECT_ID(N'tempdb..#Optout') IS NOT NULL 
+			DROP TABLE #Optout
+
+SELECT		p.Patient_id,
+			p.registration_guid
+INTO		#Optout
+FROM		observation o 
+			INNER JOIN patient p ON o.registration_guid = p.registration_guid
+WHERE		o.opt_out_93c1_flag = 'true'
+
+--	SELECT COUNT(1), COUNT(DISTINCT patient_id) FROM #optout
 
 ---------------------------------------------------------------------------------------------------
 ---------------------------------------------------------------------------------------------------
@@ -306,10 +358,60 @@ IF OBJECT_ID (N'tempdb..#Weight',N'U') IS NOT NULL
 Current have inclusion datasets for:
 	Patient		-1996 rows
 	Asthma		-404 rows
-	Medication	-0 rows (tested without this criteria created 2994 rows)
+	Medication	-0 rows (tested without this criteria created 2994 rows /134 unique patients)
 
 Currently have exclusion datasets for:
 	Smoker		-805 rows
 	COPD		-59 rows
 	Weight		-163 rows
-/*
+	Optout		-658 - 9 unique patients
+*/
+IF OBJECT_ID (N'tempdb..#Inclusions',N'U') IS NOT NULL
+			DROP TABLE #Inclusions
+
+
+--	Blended inclusions
+SELECT		a.Patient_id, 'asthma' AS Source
+INTO		#Inclusions
+FROM		#AsthmaShortList a
+UNION
+SELECT		m.Patient_id, 'medication' AS Source
+FROM		#MedicationShortList m
+
+
+IF OBJECT_ID (N'tempdb..#Exclusions',N'U') IS NOT NULL
+			DROP TABLE #Exclusions
+
+--	Blended Exclusions
+SELECT		s.Patient_id, 'smoker' AS Source
+INTO		#Exclusions
+FROM		#SmokerShortList s
+UNION
+SELECT		c.Patient_id, 'COPD' AS Source
+FROM		#COPDShortList c
+UNION
+SELECT		w.Patient_id, 'weight' AS Source
+FROM		#WeightShortList w
+UNION
+SELECT		o.Patient_id, 'optout' AS Source
+FROM		#Optout o
+
+
+
+---------------------------------------------------------------------------------------------------
+---------------------------------------------------------------------------------------------------
+--	Build output
+
+--	output 
+
+SELECT		DISTINCT
+			p.registration_guid,
+			p.patient_id, 
+			p.FullName, 
+			p.postcode,
+			p.age,
+			p.gender
+FROM		#PatientList p
+			INNER JOIN #Inclusions i ON p.patient_id = i.patient_id		--	reduction to 58 unique clients
+WHERE		p.patient_id NOT IN (
+				SELECT e.patient_id from #Exclusions e )-- Reduction to 36 records
