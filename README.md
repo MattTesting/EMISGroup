@@ -15,7 +15,8 @@ returned any results so this file opened up the data to the top 5 postcode (outb
 This is the query submitted for Part2.  It returns zero records due to the medication constraint as I have implemented it.
 
 >>Environment
-The data was loaded into a desktop build of SQL Server 2022 Express and uses SSMS v19
+>The data was loaded into a desktop build of SQL Server 2022 Express and uses SSMS v19
+>File groups for medication and observations were merged using a DOS command before being loaded into the RDBMS.
 
 >>Best Practice
 >Variables.  There is a date calculation in the code for 'the last 30 years'.  Depending on how often this is required and the range of values, it may be worth pushing this calculation into a variable and embedding it at the start of the code.
